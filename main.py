@@ -3,7 +3,7 @@ import query
 import pandas as pd
 from pandasql import sqldf
 pd.set_option('display.max_columns', 40)
-pd.set_option('display.width', 500)
+pd.set_option('display.width', 300)
 pd.set_option('display.max_rows', 500)
 pd.set_option('display.min_rows', 100)
 if __name__ == '__main__':

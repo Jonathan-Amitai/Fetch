@@ -97,7 +97,6 @@ def parse_receipts_file(input_json, date_format_cols, col_mapping, final_output_
     output_df = pd.DataFrame()
     # cols = set({})
     for purchase in input_json:
-        # print(f"The purchase is {purchase}")
         purchase_list = pd.DataFrame()
         receipt = purchase.get("rewardsReceiptItemList")
         if receipt is not None:
