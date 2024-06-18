@@ -12,31 +12,19 @@ def parse_file(file_path):
         return output
 
 
-def clean_user(user):
-    for k, v in user.items():
-        if isinstance(v, dict): #only happens when there's exactly one kv pair
-            value = None
-            if "$oid" in v:
-                value = v["$oid"]
-            elif "$date" in v:
-                value = v["$date"]
-            user[k] = value #change outer key from dict to just the one value
-    return user
-
-
 def convert_date_col(df, col_name, output_col_name=None):
     df[col_name] = pd.to_datetime(df[col_name], unit='ms', origin='unix')
     if output_col_name is not None:
         df.rename(columns={col_name: output_col_name}, inplace=True)
 
 
-def get_users_table(json):
+def get_users_table(input_json):
     col_names = ["user_id", "active", "date_created", "last_login", "role", "sign_up_source", "state"]
     # output_json = []
     # for user in json:
     #     # user = clean_user(user)
     #     output_json.append(user)
-    output_df = pd.json_normalize(json, sep="_")
+    output_df = pd.json_normalize(input_json, sep="_")
     # output_df.columns = col_names
     output_df.rename(columns={"_id_$oid": "userId"}, inplace=True)
     convert_date_col(output_df, "createdDate_$date", output_col_name="dateCreated")
@@ -44,149 +32,107 @@ def get_users_table(json):
     return output_df
 
 
-def get_brands_table(json):
+def get_brands_table(input_json):
     col_names = ["brand_id", "brand_name", "top_brand", "cpg_ref", "cpg_id"]
     # output_json = []
     # for brand in json:
     #     brand = clean_user(brand)
     #     output_json.append(bra)
-    output_df = pd.json_normalize(json, sep="_")
+    output_df = pd.json_normalize(input_json, sep="_")
     output_df.rename(columns={"_id_$oid": "brandId", "cpg_$id_$oid": "cpg_id", "cpg_$ref": "cpg_ref"}, inplace=True)
-    print(output_df)
-
-
-def get_purchases_table_test(json):
-    col_names = ["barcode", "finalPrice", "itemPrice", "needsFetchReview", "preventTargetGapPoints", "quantityPurchased", "userFlaggedNewItem"]
-    output_df = pd.DataFrame()
-    for purchase in json:
-        # print(purchase)
-        if "rewardsReceiptItemList" in purchase:
-            purchase_val = purchase["rewardsReceiptItemList"]
-            purchase_list = pd.json_normalize(purchase_val)
-            output_df = pd.concat([output_df, purchase_list], ignore_index=True)
-    #         cols = list(output_df.columns)
-    #         for col in cols:
-    #             our_set.add(col)
-    # print(our_set)
     return output_df
 
 
-def get_items_table(json):
-    output_cols = ["barcode", "description", "brandCode", "originalReceiptItemText", "itemNumber", "competitiveProduct", "metabriteCampaignId"]
-    output_df = pd.DataFrame()
-    for purchase in json:
-        # print(purchase)
-        if "rewardsReceiptItemList" in purchase:
-            purchase_val = purchase["rewardsReceiptItemList"]
-            purchase_list = pd.json_normalize(purchase_val)
-            output_df = pd.concat([output_df, purchase_list], ignore_index=True)
-    output_df = output_df[output_cols]
-    output_df.drop_duplicates(inplace=True)
-    output_df.dropna(axis="rows", how="all", inplace=True)
-    output_df.reset_index(drop=True, inplace=True)
-    return output_df
+def add_ror_cols(purchase_list, rest_of_receipt, col_mapping):
+    for k, v in col_mapping.items():
+        purchase_list[k] = rest_of_receipt.get(v)
+    return purchase_list
 
 
-def get_purchases_table(json):
-    col_names = ["finalPrice", "itemPrice", "needsFetchReview", "partnerItemId", "preventTargetGapPoints",
+def get_formatting_info(table_name):
+    match table_name.lower():
+        case "purchases":
+            date_format_cols = ["purchaseDate"]
+            col_mapping = {"userId": "userId", "receiptId": "_id.$oid", "purchaseDate": "purchaseDate.$date",
+                           "bonusPointsEarned": "bonusPointsEarned", "bonusPointsEarnedReason": "bonusPointsEarnedReason"}
+            final_output_cols = ["barcode", "userId", "receiptId", "purchaseDate", "finalPrice", "itemPrice",
+                                 "needsFetchReview", "partnerItemId", "preventTargetGapPoints",
                  "quantityPurchased", "userFlaggedBarcode", "userFlaggedNewItem", "userFlaggedPrice",
                  "userFlaggedQuantity", "needsFetchReviewReason", "pointsNotAwardedReason", "userFlaggedDescription",
                  "originalMetaBriteBarcode", "originalMetaBriteDescription", "discountedItemPrice",
                  "originalMetaBriteQuantityPurchased", "pointsEarned", "targetPrice", "originalFinalPrice",
                  "originalMetaBriteItemPrice", "priceAfterCoupon"]
-    output_df = pd.DataFrame()
-    for purchase in json:
-        # print(f"The purchase is {purchase}")
-        purchase_list = pd.Series()
-        if "rewardsReceiptItemList" in purchase:
-            purchase_val = purchase["rewardsReceiptItemList"]
-            purchase_list = pd.json_normalize(purchase_val)
-            # print(purchase_list)
-            del purchase["rewardsReceiptItemList"]
-        rest_of_receipt = pd.json_normalize(purchase).iloc[0]
-        # purchase_list = pd.concat([purchase_list, rest_of_receipt], axis=1)
-        # print(pu)
-        purchase_list["userId"] = rest_of_receipt.get("userId")
-        purchase_list["receiptId"] = rest_of_receipt.get("_id.$oid")
-        purchase_list["purchaseDate"] = rest_of_receipt.get("purchaseDate.$date")
-        # print(f"After adding all other cols: {purchase_list}")
-        output_df = pd.concat([output_df, purchase_list], ignore_index=True)
-    convert_date_col(output_df, "purchaseDate")
-    output_df = output_df[["barcode", "userId", "receiptId", "purchaseDate"] + col_names]
-    output_df.replace({pd.NaT: None, np.nan: None}, inplace=True)
-    return output_df
+            return date_format_cols, col_mapping, final_output_cols
+        case "receipts":
+            date_format_cols = ["purchaseDate", "createdDate", "finishedDate", "dateScanned", "modifyDate",
+                                "pointsAwardedDate"]
+            col_mapping = {"receiptId": "_id.$oid", "userId": "userId", "purchaseDate": "purchaseDate.$date",
+                           "createdDate": "createDate.$date", "finishedDate": "finishedDate.$date",
+                           "dateScanned": "dateScanned.$date", "modifyDate": "modifyDate.$date",
+                           "pointsAwardedDate": "pointsAwardedDate.$date", "totalSpent": "totalSpent",
+                           "pointsEarned": "pointsEarned", "bonusPointsEarned": "bonusPointsEarned",
+                           "bonusPointsEarnedReason": "bonusPointsEarnedReason", "purchasedItemCount": "purchasedItemCount",
+                           "rewardsReceiptStatus": "rewardsReceiptStatus"}
+            final_output_cols = ["receiptId", "userId", "purchaseDate", "createdDate", "finishedDate", "dateScanned",
+                                 "modifyDate", "pointsAwardedDate", "totalSpent", "pointsEarned", "bonusPointsEarned",
+                                 "purchasedItemCount", "rewardsReceiptStatus"]
+            return date_format_cols, col_mapping, final_output_cols
+        case "items":
+            data_format_cols = []
+            col_mapping = {}
+            final_output_cols = ["barcode", "description", "brandCode", "originalReceiptItemText",
+                                 "itemNumber", "competitiveProduct", "metabriteCampaignId"]
+            return data_format_cols, col_mapping, final_output_cols
+        case "rewards":
+            data_format_cols = []
+            col_mapping = {"userId": "userId", "receiptId": "_id.$oid"}
+            final_output_cols = ["barcode", "receiptId", "pointsPayerId", "rewardsGroup",
+                                 "rewardsProductPartnerId", "competitorRewardsGroup"]
+            return data_format_cols, col_mapping, final_output_cols
+        case _:
+            raise ValueError("Table name is invalid")
 
 
-def get_rewards_table(json):
-    col_names = ["pointsPayerId", "rewardsGroup", "rewardsProductPartnerId", "competitorRewardsGroup"]
-    output_df = pd.DataFrame()
-    for purchase in json:
-        # print(f"The purchase is {purchase}")
-        purchase_list = pd.Series()
-        if "rewardsReceiptItemList" in purchase:
-            purchase_val = purchase["rewardsReceiptItemList"]
-            purchase_list = pd.json_normalize(purchase_val)
-            # print(purchase_list)
-            del purchase["rewardsReceiptItemList"]
-        rest_of_receipt = pd.json_normalize(purchase).iloc[0]
-        # purchase_list = pd.concat([purchase_list, rest_of_receipt], axis=1)
-        # print(pu)
-        purchase_list["userId"] = rest_of_receipt.get("userId")
-        purchase_list["receiptId"] = rest_of_receipt.get("_id.$oid")
-        # print(f"After adding all other cols: {purchase_list}")
-        output_df = pd.concat([output_df, purchase_list], ignore_index=True)
-    output_df = output_df[["barcode"] + col_names]
-    output_df.replace({pd.NaT: None, np.nan: None}, inplace=True)
-    output_df.drop_duplicates(inplace=True)
-    output_df.dropna(axis="rows", how="all", inplace=True)
-    output_df = output_df.loc[output_df["barcode"] != "4011"]
-    output_df.reset_index(drop=True, inplace=True)
-    return output_df
-
-
-def get_receipts_table(json):
+def parse_receipts_file(input_json, date_format_cols, col_mapping, final_output_cols):
     output_df = pd.DataFrame()
     # cols = set({})
-    for purchase in json:
+    for purchase in input_json:
         # print(f"The purchase is {purchase}")
         purchase_list = pd.DataFrame()
-        if "rewardsReceiptItemList" in purchase:
-            purchase_val = purchase["rewardsReceiptItemList"]
-            purchase_list = pd.json_normalize(purchase_val)
-            # print(purchase_list)
-            del purchase["rewardsReceiptItemList"]
-        rest_of_receipt = pd.json_normalize(purchase).iloc[0]
-        # print(rest_of_receipt)
-        # for col in list(rest_of_receipt.index):
-        #     cols.add(col)
-        # purchase_list = pd.concat([purchase_list, rest_of_receipt], axis=1)
-        purchase_list["receiptId"] = rest_of_receipt.get("_id.$oid")
-        purchase_list["userId"] = rest_of_receipt.get("userId")
-        purchase_list["purchaseDate"] = rest_of_receipt.get("purchaseDate.$date")
-        purchase_list["createdDate"] = rest_of_receipt.get("createDate.$date")
-        purchase_list["finishedDate"] = rest_of_receipt.get("finishedDate.$date")
-        purchase_list["dateScanned"] = rest_of_receipt.get("dateScanned.$date")
-        purchase_list["modifyDate"] = rest_of_receipt.get("modifyDate.$date")
-        purchase_list["pointsAwardedDate"] = rest_of_receipt.get("pointsAwardedDate.$date")
-        purchase_list["totalSpent"] = rest_of_receipt.get("totalSpent")
-        purchase_list["pointsEarned"] = rest_of_receipt.get("pointsEarned")
-        purchase_list["bonusPointsEarned"] = rest_of_receipt.get("bonusPointsEarned")
-        purchase_list["bonusPointsEarnedReason"] = rest_of_receipt.get("bonusPointsEarnedReason")
-        purchase_list["purchasedItemCount"] = rest_of_receipt.get("purchasedItemCount")
-        purchase_list["rewardsReceiptStatus"] = rest_of_receipt.get("rewardsReceiptStatus")
-        # print(f"After adding all other cols: {purchase_list}")
+        receipt = purchase.get("rewardsReceiptItemList")
+        if receipt is not None:
+            purchase_list = pd.json_normalize(receipt)
+        # json.normalize can't be called when one of the values is an array, the data in there has already
+        # been stored and is no longer needed. The key is not deleted since the same json needs to be there for
+        # parsing multiple tables
+        json_f_dict = {k: v for k, v in purchase.items() if k != "rewardsReceiptItemList"}
+        rest_of_receipt = pd.json_normalize(json_f_dict).iloc[0]
+        purchase_list = add_ror_cols(purchase_list, rest_of_receipt, col_mapping)
         output_df = pd.concat([output_df, purchase_list], ignore_index=True)
-    convert_date_col(output_df, "purchaseDate")
-    convert_date_col(output_df, "createdDate")
-    convert_date_col(output_df, "finishedDate")
-    convert_date_col(output_df, "dateScanned")
-    convert_date_col(output_df, "modifyDate")
-    convert_date_col(output_df, "pointsAwardedDate")
-    output_df = output_df[["receiptId", "userId", "purchaseDate", "createdDate", "finishedDate", "dateScanned",
-                           "modifyDate", "pointsAwardedDate", "totalSpent", "pointsEarned", "bonusPointsEarned",
-                           "purchasedItemCount", "rewardsReceiptStatus"]]
+    for col in date_format_cols:
+        convert_date_col(output_df, col)
+    output_df = output_df[final_output_cols]
     output_df.replace({pd.NaT: None, np.nan: None}, inplace=True)
     output_df.drop_duplicates(inplace=True)
     output_df.dropna(axis="rows", how="all", inplace=True)
     output_df.reset_index(drop=True, inplace=True)
     return output_df
+
+
+def generate_table(table_name):
+    match table_name.lower():
+        case "users":
+            input_json = parse_file("users.json")
+            return get_users_table(input_json)
+        case "brands":
+            input_json = parse_file("brands.json")
+            return get_brands_table(input_json)
+        case "items" | "rewards" | "receipts" | "purchases":
+            pass
+        case _:
+            raise ValueError("Table name entered is invalid")
+    input_json = parse_file("receipts.json")
+    date_format_cols, col_mapping, final_output_cols = get_formatting_info(table_name)
+    output_table = parse_receipts_file(input_json, date_format_cols, col_mapping, final_output_cols)
+    return output_table
+
