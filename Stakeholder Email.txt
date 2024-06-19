@@ -1,0 +1,7 @@
+Hi [Stakeholder],
+
+When examining purchasing data, I noticed that it is often missing the item barcode. In fact, over seven months of purchasing data, more than half of the records don't contain this information. This data is crucial for making informed decisions about the needs and wants of customers. In order to resolve this issue, I would need to know more information about where this data is coming from. Could you please connect me with someone who is responsible for managing this data pipeline?
+
+Thanks,
+Jonathan
+

@@ -1,7 +1,6 @@
-import parse_input
-import query
+import data_analysis
 import pandas as pd
-from pandasql import sqldf
+from sqlalchemy import create_engine
 pd.set_option('display.max_columns', 40)
 pd.set_option('display.width', 300)
 pd.set_option('display.max_rows', 500)
@@ -10,20 +9,27 @@ if __name__ == '__main__':
     users_file = "users.json"
     brands_file = "brands.json"
     receipts_file = 'receipts.json'
-    items = parse_input.generate_table("items")
-    receipts = parse_input.generate_table("receipts")
-    purchases = parse_input.generate_table("purchases")
-    # pysqldf = lambda q: sqldf(q, globals())
-    # q1 = query.get_join_tables_query("items", "receipts", "purchases")
-    # joined_df = pysqldf(q1)
-    # # print(joined_df)
-    # q2 = query.get_bucket_by_month_query("joined_df")
-    # bucketed_df = pysqldf(q2)
-    # # print(bucketed_df)
-    # q3 = query.get_quant_purchased_query("bucketed_df")
-    # ranked_df = pysqldf(q3)
-    # # print(ranked_df)
-    # q4 = query.get_top_n_query("ranked_df", 5)
-    # final_df = pysqldf(q4)
-    # print(final_df)
-    print(purchases[purchases["quantityPurchased"].isnull()])
+    top_n = 5
+    engine = create_engine("sqlite://")
+    data_analysis.write_output(engine)
+    top_n_brands = data_analysis.get_top_n_brands(engine, top_n)
+    print(f"Top {top_n} brands by monthly purchase count:")
+    print(top_n_brands)
+    print("\n")
+    with engine.connect() as connection:
+        q = """WITH month_year AS (SELECT barcode, userId, purchaseDate, strftime('%Y', purchaseDate) AS year,
+         strftime('%m', purchaseDate) AS month FROM purchases) 
+          SELECT a.month, a.year, a.cnt_barcode, b.cnt_no_barcode FROM (SELECT month, year, count(*) AS cnt_barcode FROM month_year
+          WHERE barcode IS NOT NULL
+          GROUP BY 1, 2) AS a
+          INNER JOIN
+          (SELECT month, year, count(*) AS cnt_no_barcode FROM month_year
+          WHERE barcode IS NULL
+          GROUP BY 1, 2) AS b
+          ON a.month = b.month
+          AND a.year = b.year
+          """
+        barcode_cnt = pd.read_sql(q, connection)
+        print("Purchase record counts with and without barcodes across different months:")
+        print(barcode_cnt)
+
